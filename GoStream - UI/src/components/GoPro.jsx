@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, Typography, Box, Switch, Grid, Menu, MenuItem, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Button } from '@mui/material';
 import axios from 'axios';
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import { areaElementClasses, lineElementClasses } from '@mui/x-charts/LineChart';
 
-const GoPro = ({ gopro, host, addLog, updateGoProState }) => {
+const GoPro = ({ gopro, host, addLog, updateGoProState, updateFileList, isGloballyBusy }) => {
   const [trafficData, setTrafficData] = useState(Array(30).fill(0));
   const lastTrafficData = useRef({ bytes: 0, timestamp: Date.now() });
   const [isControl, setIsControl] = useState(gopro.ctrl || false);
@@ -13,6 +13,8 @@ const GoPro = ({ gopro, host, addLog, updateGoProState }) => {
   const [contextMenu, setContextMenu] = useState(null);
   const [confirmRebootOpen, setConfirmRebootOpen] = useState(false);
   const [confirmWipeOpen, setConfirmWipeOpen] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
+  const pollIntervalRef = useRef(null);
 
   const handleContextMenu = (event) => {
     event.preventDefault();
@@ -38,6 +40,13 @@ const GoPro = ({ gopro, host, addLog, updateGoProState }) => {
   const handleWipeClick = () => {
     setContextMenu(null);
     setConfirmWipeOpen(true);
+    setTimeout(async () => {
+      addLog(`Refreshing file list for ${gopro.device}...`);
+      if (updateFileList) {
+        const updatedGoPro = await updateFileList(gopro);
+        updateGoProState(gopro.device, updatedGoPro);
+      }
+    }, 2000);
   };
 
   const handleCloseConfirm = () => {
@@ -60,8 +69,13 @@ const GoPro = ({ gopro, host, addLog, updateGoProState }) => {
     setConfirmWipeOpen(false);
     addLog(`Wiping ${gopro.device}...`);
     try {
-      await axios.post(`http://${host.address}/gopros/files/wipe`, gopro);
-      addLog(`Wipe command sent to ${gopro.device}.`);
+      const response = await axios.post(`http://${host.address}/gopros/files/wipe`, gopro);
+      if (response.data && response.data.GoPro) {
+        updateGoProState(response.data.GoPro.device, response.data.GoPro);
+      }
+      if (response.data && response.data.logs) {
+        addLog(response.data.logs);
+      }
     } catch (error) {
       addLog(`❌ Error wiping ${gopro.device}: ${error.message}`);
     }
@@ -73,19 +87,45 @@ const GoPro = ({ gopro, host, addLog, updateGoProState }) => {
     setIsRecording(gopro.rcrd || false);
   }, [gopro.ctrl, gopro.strm, gopro.rcrd]);
 
+  const goproRef = useRef(gopro);
   useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const response = await axios.post(`http://${host.address}/gopros/status`, gopro);
-        updateGoProState(gopro.device, response.data);
-      } catch (error) {
-        console.error(`Failed to fetch status for ${gopro.device}`, error);
-      }
-    };
+    goproRef.current = gopro;
+  }, [gopro]);
 
-    const intervalId = setInterval(fetchStatus, 5000);
-    return () => clearInterval(intervalId);
-  }, [host.address, gopro, updateGoProState]);
+  const fetchStatus = useCallback(async () => {
+    try {
+      const response = await axios.post(`http://${host.address}/gopros/status`, goproRef.current);
+      updateGoProState(goproRef.current.device, response.data);
+    } catch (error) {
+      console.error(`Failed to fetch status for ${goproRef.current.device}: ${error.message}`);
+      updateGoProState(goproRef.current.device, { ctrl: null, strm: null, rcrd: null });
+    }
+  }, [host.address, updateGoProState]);
+
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    stopPolling(); // Ensure no multiple intervals are running
+    pollIntervalRef.current = setInterval(fetchStatus, 3000);
+  }, [fetchStatus, stopPolling]);
+
+  useEffect(() => {
+    startPolling();
+    return stopPolling;
+  }, [startPolling, stopPolling]);
+
+  useEffect(() => {
+    if (isGloballyBusy) {
+      stopPolling();
+    } else {
+      startPolling();
+    }
+  }, [isGloballyBusy, startPolling, stopPolling]);
 
   useEffect(() => {
     const fetchTraffic = async () => {
@@ -151,20 +191,6 @@ const GoPro = ({ gopro, host, addLog, updateGoProState }) => {
   const startRecording = () => handleApiCall('/gopros/recording/start', 'start recording', gopro);
   const stopRecording = () => handleApiCall('/gopros/recording/stop', 'stop recording', gopro);
 
-  const handleControlChange = async (event) => {
-    const newState = event.target.checked;
-    const oldState = isControl;
-    setIsControl(newState);
-    updateGoProState(gopro.device, { ...gopro, ctrl: newState });
-    if (newState) {
-      const result = await takeControl();
-      if (!result) {
-        setIsControl(oldState);
-        updateGoProState(gopro.device, { ...gopro, ctrl: oldState });
-      }
-    }
-  };
-
   const getBroadcastAddress = (cidr) => {
     if (!cidr) return null;
     const [ip, prefix] = cidr.split('/');
@@ -186,67 +212,60 @@ const GoPro = ({ gopro, host, addLog, updateGoProState }) => {
     return broadcastParts.join('.');
   };
 
-  const handleStreamChange = async (event) => {
-    const newState = event.target.checked;
-    const oldState = isStream;
-    setIsStream(newState);
-    updateGoProState(gopro.device, { ...gopro, strm: newState });
-
-    if (newState) { // Start stream
-      const result = await startStream();
-
-      if (result && result.pid) {
-        updateGoProState(gopro.device, { forwardingPid: result.pid });
-      }
-
-      if (result === null) {
-        setIsStream(oldState);
-        updateGoProState(gopro.device, { ...gopro, strm: oldState });
-      }
-    } else { // Stop stream
-      if (gopro.forwardingPid) {
-        try {
-          addLog(`Stopping forwarder for ${gopro.device} (PID: ${gopro.forwardingPid})...`);
-          await axios.get(`http://${host.address}/system/forward/stop/${gopro.forwardingPid}`);
-          updateGoProState(gopro.device, { forwardingPid: null });
-          addLog(`Forwarder stopped for ${gopro.device}.`);
-        } catch (error) {
-          addLog(`❌ Error stopping forwarder for ${gopro.device}: ${error.message}`);
-        }
-      }
-      const result = await stopStream();
-      if (result === null) {
-        setIsStream(newState); // Revert to the "on" state
-        updateGoProState(gopro.device, { ...gopro, strm: newState });
-      }
+  const handleAction = async (action) => {
+    if (isBusy) return;
+    setIsBusy(true);
+    stopPolling();
+    try {
+      await action();
+    } finally {
+      await fetchStatus();
+      startPolling();
+      setIsBusy(false);
     }
   };
 
-  const handleRecordingChange = async (event) => {
+  const handleControlChange = (event) => {
+    if (isBusy || isGloballyBusy) return;
     const newState = event.target.checked;
-    const oldState = isRecording;
-    setIsRecording(newState);
-    updateGoProState(gopro.device, { ...gopro, rcrd: newState });
+    setIsControl(newState);
+    handleAction(async () => {
+      if (newState) {
+        await takeControl();
+      }
+      // No 'else' needed as control cannot be relinquished via this switch
+    });
+  };
 
-    if (!newState) { // Stop recording
-      if (gopro.forwardingPid) {
-        try {
-          addLog(`Stopping forwarder for ${gopro.device} (PID: ${gopro.forwardingPid})...`);
-          await axios.get(`http://${host.address}/system/forward/stop/${gopro.forwardingPid}`);
-          updateGoProState(gopro.device, { forwardingPid: null });
-          addLog(`Forwarder stopped for ${gopro.device}.`);
-        } catch (error) {
-          addLog(`❌ Error stopping forwarder for ${gopro.device}: ${error.message}`);
+  const handleStreamChange = (event) => {
+    if (isBusy || isGloballyBusy) return;
+    const newState = event.target.checked;
+    setIsStream(newState);
+    handleAction(async () => {
+      if (newState) {
+        await startStream();
+      } else {
+        await stopStream();
+      }
+    });
+  };
+
+  const handleRecordingChange = (event) => {
+    if (isBusy || isGloballyBusy) return;
+    const newState = event.target.checked;
+    setIsRecording(newState);
+    handleAction(async () => {
+      const action = newState ? startRecording : stopRecording;
+      await action();
+      if (!newState) { // If stopping recording was successful
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s for file to be written
+        addLog(`Refreshing file list for ${gopro.device}...`);
+        if (updateFileList) {
+          const updatedGoPro = await updateFileList(gopro);
+          updateGoProState(gopro.device, updatedGoPro);
         }
       }
-    }
-
-    const action = newState ? startRecording : stopRecording;
-    const result = await action();
-    if (!result) {
-      setIsRecording(oldState);
-      updateGoProState(gopro.device, { ...gopro, rcrd: oldState });
-    }
+    });
   };
 
   const yMax = Math.max(...trafficData, 102400);

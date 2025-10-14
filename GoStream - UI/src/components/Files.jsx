@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Card, CardContent, Typography, List, ListItem, ListItemText, Button, Checkbox, Box, LinearProgress } from '@mui/material';
 import axios from 'axios';
 
-const Files = ({ files, onFilesDeleted, addLog }) => {
+const Files = ({ files, addLog, fetchGoPros }) => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [downloadProgress, setDownloadProgress] = useState({});
 
@@ -38,17 +38,12 @@ const Files = ({ files, onFilesDeleted, addLog }) => {
   };
 
   const deleteSelectedFiles = async () => {
-    const successfullyDeleted = [];
     for (const file of selectedFiles) {
-      const response = await handleApiCall(`http://${file.host.address}/gopros/files/remove?path=${file.path}`, `delete file ${file.name}`, file.gopro);
-      if (response) {
-        successfullyDeleted.push(file);
-      }
-    }
-    if (successfullyDeleted.length > 0) {
-      onFilesDeleted(successfullyDeleted);
+      await handleApiCall(`http://${file.host.address}/gopros/files/remove?path=${file.path}`, `delete file ${file.name}`, file.gopro);
     }
     setSelectedFiles([]);
+    addLog("Refreshing file list...");
+    await fetchGoPros();
   };
 
   const downloadSelectedFiles = async () => {
@@ -133,4 +128,4 @@ const Files = ({ files, onFilesDeleted, addLog }) => {
   );
 };
 
-export default Files;
+export default Files; 

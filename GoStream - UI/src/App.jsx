@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Tabs, Tab, Box, useMediaQuery, useTheme } from '@mui/material';
 import HostView from './components/HostView';
 import Home from './components/Home';
@@ -26,8 +26,17 @@ function TabPanel(props) {
 function App() {
   const [hosts, setHosts] = useState([]);
   const [activeTab, setActiveTab] = useState(0);
+  const [blinker, setBlinker] = useState(true);
+  const [isGloballyBusy, setIsGloballyBusy] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setBlinker(prev => !prev);
+    }, 2000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   const updateHostState = useCallback((hostAddress, newStateOrFn) => {
     setHosts(currentHosts =>
@@ -74,7 +83,7 @@ function App() {
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100vh', pt: { xs: 0, md: 2 } }}>
+    <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100vh', pt: { xs: 0, md: 1 } }}>
       <Tabs
         orientation={isMobile ? 'horizontal' : 'vertical'}
         variant="scrollable"
@@ -103,7 +112,7 @@ function App() {
         ))}
       </Tabs>
       <TabPanel value={activeTab} index={0}>
-        <Home addHost={addHost} hosts={hosts} />
+        <Home addHost={addHost} hosts={hosts} updateHostState={updateHostState} blinker={blinker} isGloballyBusy={isGloballyBusy} setIsGloballyBusy={setIsGloballyBusy} />
       </TabPanel>
       {hosts.map((host, index) => (
         <TabPanel value={activeTab} index={index + 1} key={host.address}>
@@ -111,6 +120,8 @@ function App() {
             host={host}
             removeHost={() => removeHost(host.address)}
             updateHostState={updateHostState}
+            isGloballyBusy={isGloballyBusy}
+            setIsGloballyBusy={setIsGloballyBusy}
           />
         </TabPanel>
       ))}

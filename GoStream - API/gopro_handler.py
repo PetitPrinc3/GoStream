@@ -1,9 +1,11 @@
 import subprocess
 import re
-import requests
+import httpx
 import argparse
 import psutil
-from time import sleep, strftime, localtime
+import asyncio
+import requests
+from time import strftime, localtime, sleep
 from pydantic import BaseModel
 
 ip_binary = '/usr/sbin/ip'
@@ -83,156 +85,155 @@ class GoPro():
         gopro.rcrd = json.get('rcrd')
         return gopro
 
-    def update_status(self):
-        self.ctrl = self.getControlStatus()
-        self.strm = self.getStreamStatus()
-        self.rcrd = self.getRecordingStatus()
-        self.getFiles()
+    async def update_status(self, client: httpx.AsyncClient):
+        self.ctrl = await self.getControlStatus(client)
+        self.strm = await self.getStreamStatus(client)
+        self.rcrd = await self.getRecordingStatus(client)
+        await self.getFiles(client)
         return self
 
     def getCameraIp(self):
         return '.'.join([bit for bit in self.device_ip.split('.')[:-1]] + ['51'])
 
-    def getControlStatus(self):
+    async def getControlStatus(self, client: httpx.AsyncClient):
         try:
-            response = requests.get(''.join(['http://', self.getCameraIp(), gopro_stat_path]), timeout=2)
+            response = await client.get(''.join(['http://', self.getCameraIp(), gopro_stat_path]), timeout=2)
             if response.status_code == 200 and 'status' in response.json() and "114" in response.json()["status"]:
                 return response.json()["status"]["114"] == 2
             if response.status_code == 200 and 'status' in response.json() and "115" in response.json()["status"]:
                 return response.json()["status"]["115"] == 1
             if response.status_code == 200 and 'status' in response.json() and "116" in response.json()["status"]:
                 return response.json()["status"]["116"] == 1
-        except requests.exceptions.RequestException:
+        except httpx.RequestError:
             pass
         return None # Return None on error
 
-    def getStreamStatus(self):
+    async def getStreamStatus(self, client: httpx.AsyncClient):
         try:
-            response = requests.get(''.join(['http://', self.getCameraIp(), gopro_stat_path]), timeout=2)
+            response = await client.get(''.join(['http://', self.getCameraIp(), gopro_stat_path]), timeout=2)
             if response.status_code == 200 and 'status' in response.json() and "32" in response.json()["status"]:
                 return response.json()["status"]["32"] == 1
-        except requests.exceptions.RequestException:
+        except httpx.RequestError:
             pass
         return None # Return None on error
 
-    def getRecordingStatus(self): # Added self
+    async def getRecordingStatus(self, client: httpx.AsyncClient): # Added self
         try:
-            response = requests.get(''.join(['http://', self.getCameraIp(), gopro_stat_path]), timeout=2)
+            response = await client.get(''.join(['http://', self.getCameraIp(), gopro_stat_path]), timeout=2)
             if response.status_code == 200 and 'status' in response.json() and "10" in response.json()["status"]:
                 return response.json()["status"]["10"] == 1
-        except requests.exceptions.RequestException:
+        except httpx.RequestError:
             pass
         return None # Return None on error
 
-    def reboot(self):
+    async def reboot(self, client: httpx.AsyncClient):
         try:
-            response = requests.get(''.join(['http://', self.getCameraIp(), gopro_reboot_path]), timeout=2)
+            response = await client.get(''.join(['http://', self.getCameraIp(), gopro_reboot_path]), timeout=2)
             if response.status_code != 200 or ('err_msg' in response.json() and response.json()['err_msg'] != 'Success'):
                 return False, f'❌ Error rebooting {self.device}.'
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             return False, f'❌ Network error rebooting {self.device}: {e}'
         return f'✔  Rebooting {self.device}...'
 
-    def takeControl(self):
+    async def takeControl(self, client: httpx.AsyncClient):
+        if not self.isAlive():
+            return False, f'❌ GoPro {self.device} is not online.'
         try:
-            response = requests.get(''.join(['http://', self.getCameraIp(), usb_mode_path]), timeout=2)
+            response = await client.get(''.join(['http://', self.getCameraIp(), usb_mode_path]), timeout=2)
             if response.status_code != 200 or ('err_msg' in response.json() and response.json()['err_msg'] != 'Success'):
                 return False, f'❌ Error switching {self.device} to USB mode.'
 
-            response = requests.get(''.join(['http://', self.getCameraIp(), usb_control_path]), timeout=2)
+            response = await client.get(''.join(['http://', self.getCameraIp(), usb_control_path]), timeout=2)
             if response.status_code != 200 or ('err_msg' in response.json() and response.json()['err_msg'] != 'Success'):
                 return False, f'❌ Error taking control of {self.device} over USB.'
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             return False, f'❌ Network error taking control of {self.device}: {e}'
 
         for preset in gorpro_presets:
             try:
-                response = requests.get(''.join(['http://', self.getCameraIp(), preset]), timeout=2)
+                response = await client.get(''.join(['http://', self.getCameraIp(), preset]), timeout=2)
                 if response.status_code != 200 or ('error' in response.json()):
-                    print(preset)
-                    print(''.join(['http://', self.getCameraIp(), preset]))
-                    print(response.json())
                     return False, f'❌ Error loading presets on device {self.device}.'
-            except requests.exceptions.RequestException as e:
+            except httpx.RequestError as e:
                 return False, f'❌ Error loading presets on device {self.device}.'
 
         return True, f'✔  Took control of {self.device}.'
 
-    def startStream(self):
-        controlled, msg = self.takeControl()
+    async def startStream(self, client: httpx.AsyncClient):
+        controlled, msg = await self.takeControl(client)
         if not controlled: return msg
 
-        if self.getStreamStatus():
+        if await self.getStreamStatus(client):
             return f'✔  Stream already running for {self.device}.'
 
-        requests.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
-        response = requests.get(''.join(['http://', self.getCameraIp(), start_stream_path, str(self.port)]), timeout=2)
+        await client.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
+        response = await client.get(''.join(['http://', self.getCameraIp(), start_stream_path, str(self.port)]), timeout=2)
 
         if response.status_code != 200:
             return f'❌ Error starting stream for {self.device} on port {self.port}.'
 
-        sleep(1)
+        await asyncio.sleep(1)
 
-        if self.getStreamStatus():
+        if await self.getStreamStatus(client):
             return f'🔥 Started stream for {self.device} on port {self.port}.'
         else:
             return f'⚠️ Something went wrong starting stream on {self.device}.'
 
-    def stopStream(self):
-        if not self.getStreamStatus():
+    async def stopStream(self, client: httpx.AsyncClient):
+        if not await self.getStreamStatus(client):
             return f'✔  No active stream for {self.device}.'
 
-        response = requests.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
+        response = await client.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
 
         if response.status_code != 200:
             return f'❌ Error stopping stream for {self.device}.'
 
-        sleep(1)
+        await asyncio.sleep(1)
 
-        if not self.getStreamStatus():
+        if not await self.getStreamStatus(client):
             return f'✔  Stopped stream for {self.device}.'
         else:
             return f'⚠️ Something went wrong stopping stream on {self.device}.'
 
-    def startRecording(self):
-        controlled, msg = self.takeControl()
+    async def startRecording(self, client: httpx.AsyncClient):
+        controlled, msg = await self.takeControl(client)
         if not controlled: return msg
 
-        if self.getRecordingStatus():
+        if await self.getRecordingStatus(client):
             return f'✔  Recording already running for {self.device}.'
 
-        response = requests.get(''.join(['http://', self.getCameraIp(), start_recording_path]), timeout=2)
+        response = await client.get(''.join(['http://', self.getCameraIp(), start_recording_path]), timeout=2)
 
         if response.status_code != 200:
             return f'❌ Error starting recording for {self.device}.'
 
 
-        sleep(1)
+        await asyncio.sleep(1)
 
-        if self.getRecordingStatus():
+        if await self.getRecordingStatus(client):
             return f'🔥 Started recording for {self.device}.'
         else:
             return f'⚠️ Something went wrong starting recording on {self.device}.'
 
-    def stopRecording(self): # Renamed
-        if not self.getRecordingStatus():
+    async def stopRecording(self, client: httpx.AsyncClient): # Renamed
+        if not await self.getRecordingStatus(client):
             return f'✔  No active recording for {self.device}.'
 
-        response = requests.get(''.join(['http://', self.getCameraIp(), stop_recording_path]), timeout=2)
+        response = await client.get(''.join(['http://', self.getCameraIp(), stop_recording_path]), timeout=2)
 
         if response.status_code != 200:
             return f'❌ Error stopping recording for {self.device}.'
 
-        sleep(2)
+        await asyncio.sleep(2)
 
-        if not self.getRecordingStatus():
+        if not await self.getRecordingStatus(client):
             return f'✔  Stopped recording for {self.device}.'
         else:
             return f'⚠️ Something went wrong stopping recording on {self.device}.'
 
-    def getFiles(self):
+    async def getFiles(self, client: httpx.AsyncClient):
         try:
-            response = requests.get(''.join(['http://', self.getCameraIp(), media_list_path]), timeout=2)
+            response = await client.get(''.join(['http://', self.getCameraIp(), media_list_path]), timeout=2)
 
             if response.status_code != 200 or not 'media' in response.json():
                 return f'❌ Error fetching file list for {self.device}.'
@@ -245,20 +246,20 @@ class GoPro():
                     if file not in self.files:
                         self.files.append(file)
             return f'✔  Fetched {len(self.files)} files from {self.device}.'
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             return f'❌ Network error fetching files from {self.device}: {e}'
 
     def getDownloadUrl(self, filepath):
         return ''.join(['http://', self.getCameraIp(), media_download_path, filepath])
 
-    def downloadFile(self, filepath):
-        response = requests.get(self.getDownloadUrl(filepath), stream=True, timeout=2)
+    async def downloadFile(self, client: httpx.AsyncClient, filepath):
+        response = await client.get(self.getDownloadUrl(filepath), stream=True, timeout=2)
 
         if response.status_code != 200:
             return f'❌ Error downloading file {filepath} from {self.device}.'
 
-    def removeFile(self, filepath):
-        response = requests.get(''.join(['http://', self.getCameraIp(), media_delete_path, filepath]), timeout=2)
+    async def removeFile(self, client: httpx.AsyncClient, filepath):
+        response = await client.get(''.join(['http://', self.getCameraIp(), media_delete_path, filepath]), timeout=2)
 
         if response.status_code != 200:
             return f'❌ Error removing file {filepath} from {self.device}.'
@@ -275,7 +276,7 @@ class GoPro():
         }
 
 
-def get_gopros():
+async def get_gopros():
     global first_port
     logs = []
     dev_command = [ip_binary, '-4', 'token']
@@ -318,18 +319,22 @@ def get_gopros():
             port_found = False
             temp_port = first_port
             while not port_found:
-                if check_port_availability(temp_port):
+                if await check_port_availability(temp_port):
                     first_port = temp_port
                     port_found = True
                 else:
                     temp_port += 1
             
             gopro = GoPro(dev, ip_address, first_port)
-            gopro.update_status()
-            logs.append(gopro.getFiles())
             devices.append(gopro)
             first_port += 1
 
+            async with httpx.AsyncClient() as client:                                                                   
+                update_tasks = [dev.update_status(client) for dev in devices]                                                                            
+                results = await asyncio.gather(*update_tasks, return_exceptions=True)                                                                    
+                for result in results:                                                                                                                    
+                    if isinstance(result, Exception):                                                                                                     
+                        logs.append(f"Error updating a gopro's status: {result}")
 
     logs.append('=================================================')
     logs.append(f'🚀 Found {len(devices)} GoPros:')
@@ -338,7 +343,7 @@ def get_gopros():
     logs.append('=================================================')
     return devices, logs
 
-def check_port_availability(port):
+async def check_port_availability(port):
     lsof_command = [lsof_binary, '-i', f':{str(port)}']
     try:
         lsof_process = subprocess.run(lsof_command, capture_output=True, text=True)
@@ -387,5 +392,4 @@ if __name__ == "__main__":
             stream_status = "Streaming" if device.getStreamStatus() else "Not Streaming"
             rec_status = "Recording" if device.getRecordingStatus() else "Not Recording"
             print(f"{device.device} ({device.device_ip}): {stream_status}, {rec_status}")
-
-    print()
+            print(device.stopStream())
