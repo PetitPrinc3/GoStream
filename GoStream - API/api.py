@@ -276,8 +276,9 @@ async def generate_obs_config():
                 "is_local_file": False,
                 "input": f"udp://{stream.destination}:{stream.port}",
                 "input_format": "udp",
-                "buffering_mb": 2,
+                "buffering_mb": 0,
                 "hw_decode": True,
+                "reconnect_delay_sec": 1
             }
         })
 

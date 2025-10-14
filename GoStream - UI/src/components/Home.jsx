@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, TextField, Box, Typography, List, ListItem, ListItemText, FormControlLabel, Switch } from '@mui/material';
+import { Button, TextField, Box, Typography, List, ListItem, ListItemText, FormControlLabel, Switch, Link } from '@mui/material';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import axios from 'axios';
 import ObsIcon from './ObsIcon';
@@ -223,9 +223,23 @@ const Home = ({ addHost, hosts, updateHostState, blinker, isGloballyBusy, setIsG
           ║ ╦│ │╚═╗ │ ├┬┘├┤ ├─┤│││<br />
           ╚═╝└─┘╚═╝ ┴ ┴└─└─┘┴ ┴┴ ┴<br />
         </pre>
-        <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'text.secondary' }}>
-          Github/PetitPrinc3
-        </Typography>
+        <Link
+          href="https://github.com/PetitPrinc3"
+          target="_blank"
+          rel="noopener noreferrer"
+          underline="none"
+          sx={{
+            color: 'text.secondary',
+            transition: 'color 0.3s ease-in-out',
+            '&:hover': {
+              color: 'text.primary',
+            },
+          }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+            Github/PetitPrinc3
+          </Typography>
+        </Link>
       </div>
       <Box sx={{ width: '100%', display: 'flex', gap: 1, justifyContent: 'center', mb: 2 }}>
         <TextField
