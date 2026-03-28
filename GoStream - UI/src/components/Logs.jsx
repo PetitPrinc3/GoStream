@@ -1,23 +1,31 @@
-import React, { useEffect, useRef } from 'react';
-import { Card, CardContent, Typography, Box } from '@mui/material';
+import React, { useState, useEffect, useRef } from 'react';
+import { Card, CardContent, Typography, Box, Button } from '@mui/material';
 
 const Logs = ({ logs }) => {
+  const [extended, setExtended] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [logs]);
+  }, [logs, extended]);
+
+  const displayedLogs = extended ? logs : logs.slice(-5);
 
   return (
-    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <CardContent sx={{ flexGrow: 1, overflow: 'hidden', p: 1 }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>Logs</Typography>
+    <Card sx={{ display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ p: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+          <Typography variant="h6">Logs</Typography>
+          <Button size="small" onClick={() => setExtended(!extended)}>
+            {extended ? 'Collapse' : 'Extend'}
+          </Button>
+        </Box>
         <Box
           ref={scrollRef}
           sx={{
-            height: '80%',
+            height: extended ? '400px' : '80px',
             overflowY: 'auto',
             p: 1,
             border: '1px solid',
@@ -26,8 +34,8 @@ const Logs = ({ logs }) => {
             bgcolor: 'background.paper'
           }}
         >
-          {logs.map((log, index) => (
-            <Typography key={index} component="div" variant="body2" sx={{ fontFamily: 'monospace' }}>
+          {displayedLogs.map((log, index) => (
+            <Typography key={index} component="div" variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
               {log}
             </Typography>
           ))}

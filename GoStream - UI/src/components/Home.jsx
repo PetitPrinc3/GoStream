@@ -38,8 +38,8 @@ const Home = ({ addHost, hosts, updateHostState, blinker, isGloballyBusy, setIsG
 
     const hasActiveStreams = hosts.some(h => h.gopros && h.gopros.some(g => g.strm));
     if (!hasActiveStreams) {
-        alert("No active streams to configure.");
-        return;
+      alert("No active streams to configure.");
+      return;
     }
 
     try {
@@ -85,18 +85,18 @@ const Home = ({ addHost, hosts, updateHostState, blinker, isGloballyBusy, setIsG
     // Optimistic UI update
     const optimisticState = {};
     switch (actionType) {
-        case 'START_STREAM': optimisticState.strm = true; break;
-        case 'STOP_STREAM': optimisticState.strm = false; break;
-        case 'START_RECORD': optimisticState.rcrd = true; break;
-        case 'STOP_RECORD': optimisticState.rcrd = false; break;
-        default: break;
+      case 'START_STREAM': optimisticState.strm = true; break;
+      case 'STOP_STREAM': optimisticState.strm = false; break;
+      case 'START_RECORD': optimisticState.rcrd = true; break;
+      case 'STOP_RECORD': optimisticState.rcrd = false; break;
+      default: break;
     }
     if (Object.keys(optimisticState).length > 0) {
-        hosts.forEach(host => {
-            (host.gopros || []).forEach(gopro => {
-                updateGoProState(host.address, gopro.device, optimisticState);
-            });
+      hosts.forEach(host => {
+        (host.gopros || []).forEach(gopro => {
+          updateGoProState(host.address, gopro.device, optimisticState);
         });
+      });
     }
 
     setIsGloballyBusy(true);
@@ -141,7 +141,7 @@ const Home = ({ addHost, hosts, updateHostState, blinker, isGloballyBusy, setIsG
       return (host.gopros || []).map(async (gopro) => {
         let url = '';
         let postData = {};
-        
+
         switch (actionType) {
           case 'START_STREAM':
             url = '/gopros/stream/start';
@@ -241,22 +241,22 @@ const Home = ({ addHost, hosts, updateHostState, blinker, isGloballyBusy, setIsG
           </Typography>
         </Link>
       </div>
-      <Box sx={{ width: '100%', display: 'flex', gap: 1, justifyContent: 'center', mb: 2 }}>
+      <Box sx={{ width: '100%', display: 'flex', gap: 1, justifyContent: 'center', mb: 2, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'stretch', px: { xs: 2, md: 0 } }}>
         <TextField
           label="Host Name"
           value={hostName}
           onChange={(e) => setHostName(e.target.value)}
           variant="outlined"
-          style={{ mr: 1, width: '100px' }}
+          sx={{ mr: { md: 1 }, width: { xs: '100%', md: '150px' } }}
         />
         <TextField
           label="Host Address (e.g., 127.0.0.1:8000)"
           value={hostAddress}
           onChange={(e) => setHostAddress(e.target.value)}
           variant="outlined"
-          sx={{ mr: 1, width: '300px' }}
+          sx={{ mr: { md: 1 }, width: { xs: '100%', md: '350px' } }}
         />
-        <Button variant="contained" onClick={handleAdd}>Add</Button>
+        <Button variant="contained" onClick={handleAdd} sx={{ height: { md: '56px' } }}>Add</Button>
       </Box>
 
       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 4, mt: 4, mb: 2 }}>

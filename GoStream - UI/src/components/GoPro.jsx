@@ -277,7 +277,8 @@ const GoPro = ({ gopro, host, addLog, updateGoProState, updateFileList, isGlobal
         style={{ cursor: 'context-menu' }}
         sx={{
           height: 220,
-          width: 380,
+          width: { xs: 'calc(100vw - 40px)', sm: 380 },
+          maxWidth: 380,
           position: 'relative',
           backgroundColor: gopro.online === false ? 'action.disabledBackground' : 'background.default',
         }}

@@ -2,7 +2,7 @@
 
 GoStream is a web-based application for controlling multiple GoPro cameras, viewing their files, and streaming their video feeds. It is designed to run on a Linux-based system and provides a user-friendly interface for managing your cameras.
 
-![GoStream UI](https://i.imgur.com/your-screenshot.png) <!-- Replace with a real screenshot URL -->
+![GoStream UI](./visual.png)
 
 ## Features
 

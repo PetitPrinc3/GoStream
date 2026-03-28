@@ -306,16 +306,18 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
         />
       </Paper>
 
-      <Grid container spacing={{ xs: 2, md: 0 }} sx={{ flexGrow: 1, overflow: 'hidden', height: 'auto' }}>
+      <Grid container spacing={{ xs: 2, md: 0 }} sx={{ flexGrow: 1, alignItems: 'stretch', height: { xs: 'auto', md: '350px' }, mb: 2 }}>
         {/* GoPro and Controls Section */}
-        <Grid item xs={12} md={8} sx={{ display: 'flex', flexDirection: 'column', height: 'auto', minHeight: '320px', width: { xs: '100%', md: '65%' }, paddingRight: { xs: 0, md: 2 } }}>
-          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>
-            <Typography variant="h6" sx={{ flexShrink: 0, textAlign: 'start' }}>GoPros</Typography>
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4, p: 0, flexShrink: 0 }}>
-              <FormControlLabel control={<Switch checked={isStreamingAll} onChange={(e) => handleAllGopros(e.target.checked ? 'START_STREAM' : 'STOP_STREAM')} />} label="Stream All" />
-              <FormControlLabel control={<Switch checked={isRecordingAll} onChange={(e) => handleAllGopros(e.target.checked ? 'START_RECORD' : 'STOP_RECORD')} />} label="Record All" />
+        <Grid item xs={12} md={8} sx={{ display: 'flex', flexDirection: 'column', height: { xs: 'auto', md: '100%' }, width: { xs: '100%', md: '65%' }, paddingRight: { xs: 0, md: 2 } }}>
+          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0, flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 1, sm: 0 } }}>
+              <Typography variant="h6">GoPros</Typography>
+              <Box sx={{ display: 'flex', gap: { xs: 1, sm: 2 } }}>
+                <FormControlLabel control={<Switch checked={isStreamingAll} onChange={(e) => handleAllGopros(e.target.checked ? 'START_STREAM' : 'STOP_STREAM')} />} label="Stream All" />
+                <FormControlLabel control={<Switch checked={isRecordingAll} onChange={(e) => handleAllGopros(e.target.checked ? 'START_RECORD' : 'STOP_RECORD')} />} label="Record All" />
+              </Box>
             </Box>
-            <Box sx={{ display: 'flex', flexDirection: 'row', overflowX: 'auto', flexGrow: 1, p: 1, gap: 2, alignItems: 'flex-end' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'row', overflowX: 'auto', py: 1, gap: 2, flexGrow: 1, alignItems: 'center' }}>
               {(gopros || []).map((gopro) => (
                 <Box key={gopro.device} sx={{ flexShrink: 0 }}>
                   <GoPro gopro={gopro} host={host} addLog={addLog} updateGoProState={updateGoProState} updateFileList={updateGoProFileList} isGloballyBusy={isGloballyBusy} />
@@ -326,7 +328,7 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
         </Grid>
 
         {/* Files Section */}
-        <Grid item xs={12} md={4} sx={{ height: { xs: '350px', md: '100%' }, width: { xs: '100%  ', md: '35%' } }}>
+        <Grid item xs={12} md={4} sx={{ display: 'flex', flexDirection: 'column', height: { xs: '400px', md: '100%' }, maxHeight: { xs: '60vh', md: 'none' }, width: { xs: '100%', md: '35%' }, mt: { xs: 2, md: 0 } }}>
           <Files
             files={files || []}
             addLog={addLog}
@@ -335,7 +337,7 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
         </Grid>
       </Grid>
 
-      <Box sx={{ height: '200px', p: 0, mt: 2 }}>
+      <Box sx={{ minHeight: '150px', p: 0, mt: 0 }}>
         <Logs logs={logs} />
       </Box>
     </Box >

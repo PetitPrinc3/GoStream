@@ -16,12 +16,11 @@ function TabPanel(props) {
       {...other}
       style={{
         flexGrow: 1,
-        height: '100%',
         minWidth: 0,
         display: value === index ? 'block' : 'none'
       }}
     >
-      <Box sx={{ p: { xs: 1, md: 3 }, height: '100%' }}>
+      <Box sx={{ p: { xs: 1, md: 3 } }}>
         {children}
       </Box>
     </div>
@@ -29,6 +28,7 @@ function TabPanel(props) {
 }
 
 function App() {
+  // ... (keeping the same state and logic)
   const [hosts, setHosts] = useState(() => {
     const saved = localStorage.getItem('gostream-hosts');
     if (saved) {
@@ -130,7 +130,7 @@ function App() {
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100vh', pt: { xs: 0, md: 1 } }}>
+    <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', minHeight: '100vh', pt: { xs: 0, md: 1 } }}>
       <Tabs
         orientation={isMobile ? 'horizontal' : 'vertical'}
         variant="scrollable"
@@ -142,7 +142,12 @@ function App() {
           borderBottom: isMobile ? 1 : 0,
           borderColor: 'divider',
           width: isMobile ? '100%' : '100px',
+          height: isMobile ? '' : '100%',
           flexShrink: 0,
+          position: isMobile ? 'sticky' : 'fixed',
+          top: 0,
+          zIndex: 100,
+          backgroundColor: 'background.default',
           '& .MuiTab-root': {
             outline: 'none',
             '&:focus': {
@@ -159,21 +164,23 @@ function App() {
           <Tab label={host.name} key={host.address} />
         ))}
       </Tabs>
-      <TabPanel value={activeTab} index={0}>
-        <Home addHost={addHost} hosts={hosts} updateHostState={updateHostState} blinker={blinker} isGloballyBusy={isGloballyBusy} setIsGloballyBusy={setIsGloballyBusy} />
-      </TabPanel>
-      {hosts.map((host, index) => (
-        <TabPanel value={activeTab} index={index + 1} key={host.address}>
-          <HostView
-            host={host}
-            removeHost={() => removeHost(host.address)}
-            updateHostState={updateHostState}
-            isGloballyBusy={isGloballyBusy}
-            setIsGloballyBusy={setIsGloballyBusy}
-          />
+      <Box sx={{ flexGrow: 1, ml: isMobile ? 0 : '100px' }}>
+        <TabPanel value={activeTab} index={0}>
+          <Home addHost={addHost} hosts={hosts} updateHostState={updateHostState} blinker={blinker} isGloballyBusy={isGloballyBusy} setIsGloballyBusy={setIsGloballyBusy} />
         </TabPanel>
-      ))
-      }
+        {hosts.map((host, index) => (
+          <TabPanel value={activeTab} index={index + 1} key={host.address}>
+            <HostView
+              host={host}
+              removeHost={() => removeHost(host.address)}
+              updateHostState={updateHostState}
+              isGloballyBusy={isGloballyBusy}
+              setIsGloballyBusy={setIsGloballyBusy}
+            />
+          </TabPanel>
+        ))
+        }
+      </Box>
     </Box >
   );
 }
