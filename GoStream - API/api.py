@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Query
 from gopro_handler import GoPro, get_gopros
 import psutil
-import netifaces
+import socket
 import subprocess
 import os
 import signal
@@ -52,15 +52,13 @@ def reconcile_active_streams():
                     elif 'host=' in arg:
                         destination_ip = arg.split('=')[1]
                 
-                # Infer device name from source IP
+                # Infer device name from source IP using psutil
                 if source_ip:
-                    for iface in netifaces.interfaces():
-                        ifaddresses = netifaces.ifaddresses(iface)
-                        if netifaces.AF_INET in ifaddresses:
-                            for addr_info in ifaddresses[netifaces.AF_INET]:
-                                if addr_info['addr'] == source_ip:
-                                    device_name = iface
-                                    break
+                    for iface, addrs in psutil.net_if_addrs().items():
+                        for addr in addrs:
+                            if addr.family == socket.AF_INET and addr.address == source_ip:
+                                device_name = iface
+                                break
                         if device_name:
                             break
                 
@@ -126,34 +124,44 @@ async def up():
 # System queries (interfaces)
 
 def get_cidr_from_mask(mask):
+    if not mask:
+        return "0"
     bits = mask.split('.')
     if len(bits) != 4:
-        return 0
+        return "0"
     cidr = 0
     for bit in bits:
         if int(bit) > 255 or int(bit) < 0:
-            return 0
+            return "0"
         cidr += bin(int(bit))[2:].count('1')
     return str(cidr)
 
 @app.get('/system/interfaces/list')
 def get_interfaces():
     interfaces = {}
-    devices = netifaces.interfaces()
-    for device in devices:
-        try:
-            interface = netifaces.ifaddresses(device)[netifaces.AF_INET][0]
-            interfaces[device] = interface['addr'] + '/' + get_cidr_from_mask(interface['netmask'])
-        except (KeyError, IndexError):
-            pass # Ignore interfaces without an IPv4 address
+    for iface, addrs in psutil.net_if_addrs().items():
+        for addr in addrs:
+            if addr.family == socket.AF_INET: # IPv4
+                interfaces[iface] = f"{addr.address}/{get_cidr_from_mask(addr.netmask)}"
+                break # Take the first IPv4 address
     return interfaces
 
 @app.get('/system/interfaces/prefered')
 def get_prefered_interface():
     try:
-        prefered_interface = netifaces.gateways()['default'][netifaces.AF_INET][1]
-        return {'interface': prefered_interface}
-    except (KeyError, IndexError):
+        # Create a UDP socket to find the preferred interface
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Use a non-routable address to avoid actual traffic
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+
+        for iface, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET and addr.address == local_ip:
+                    return {'interface': iface}
+        return {'interface': None}
+    except Exception:
         return {'interface': None}
 
 @app.get('/system/interfaces/{interface}/traffic')

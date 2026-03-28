@@ -9,7 +9,6 @@ from time import strftime, localtime, sleep
 from pydantic import BaseModel
 
 ip_binary = '/usr/sbin/ip'
-ffmpeg_binary = '/usr/bin/ffmpeg'
 lsof_binary = '/usr/bin/lsof'
 
 usb_mode_path="/gopro/camera/control/wired_usb?p=1"
@@ -276,7 +275,7 @@ class GoPro():
         }
 
 
-async def get_gopros():
+async def get_gopros(): 
     global first_port
     logs = []
     dev_command = [ip_binary, '-4', 'token']

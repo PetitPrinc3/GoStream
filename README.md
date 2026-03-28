@@ -93,3 +93,9 @@ sudo apt-get install -y iproute2 gstreamer1.0-tools lsof
     -   Use the "Stream All" and "Record All" switches to control all cameras on that host simultaneously.
 5.  **Manage Files:** The "File Explorer" panel shows all files on all connected cameras. You can select files to download or delete them.
 6.  **OBS Integration:** From the "Home" tab, click "Download OBS Scene" to get a JSON file that you can import into OBS to automatically set up a scene with all your active streams.
+
+---
+
+<p align="center">
+    Vibecoded with :heart: by Gemini-CLI
+</p>

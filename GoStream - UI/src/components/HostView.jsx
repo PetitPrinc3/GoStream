@@ -172,231 +172,97 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
     return broadcastParts.join('.');
   };
 
-      const handleAllGopros = async (actionType) => {
+  const handleAllGopros = async (actionType) => {
+    if (isGloballyBusy) return;
+    // Optimistic UI update
+    const optimisticState = {};
+    switch (actionType) {
+      case 'START_STREAM': optimisticState.strm = true; break;
+      case 'STOP_STREAM': optimisticState.strm = false; break;
+      case 'START_RECORD': optimisticState.rcrd = true; break;
+      case 'STOP_RECORD': optimisticState.rcrd = false; break;
+      case 'CONTROL': optimisticState.ctrl = true; break;
+      default: break;
+    }
 
-        if (isGloballyBusy) return;
+    if (Object.keys(optimisticState).length > 0) {
+      gopros.forEach(gopro => {
+        updateGoProState(gopro.device, optimisticState);
+      });
+    }
 
-    
+    setIsGloballyBusy(true);
+    addLog(`Executing ${actionType} for all GoPros on host ${name}...`);
 
-        // Optimistic UI update
+    const actionPromises = gopros.map(async (gopro) => {
+      let url = '';
+      let postData = {};
 
-        const optimisticState = {};
-
-        switch (actionType) {
-
-            case 'START_STREAM': optimisticState.strm = true; break;
-
-            case 'STOP_STREAM': optimisticState.strm = false; break;
-
-            case 'START_RECORD': optimisticState.rcrd = true; break;
-
-            case 'STOP_RECORD': optimisticState.rcrd = false; break;
-
-            case 'CONTROL': optimisticState.ctrl = true; break;
-
-            default: break;
-
-        }
-
-        if (Object.keys(optimisticState).length > 0) {
-
-            gopros.forEach(gopro => {
-
-                updateGoProState(gopro.device, optimisticState);
-
-            });
-
-        }
-
-    
-
-        setIsGloballyBusy(true);
-
-        addLog(`Executing ${actionType} for all GoPros on host ${name}...`);
-
-        
-
-        const actionPromises = gopros.map(async (gopro) => {
-
-          let url = '';
-
-          let postData = {};
-
-    
-
-          switch (actionType) {
-
-            case 'CONTROL':
-
-              url = '/gopros/control';
-
-              postData = gopro;
-
-              break;
-
-            case 'START_STREAM':
-
-              url = '/gopros/stream/start';
-
-              postData = { gopro };
-
-              if (forwarding && interfaces && selectedInterface) {
-
-                const destinationIp = getBroadcastAddress(interfaces[selectedInterface]);
-
-                if (destinationIp) postData.forwarding = { destination: destinationIp };
-
-              }
-
-              break;
-
-            case 'STOP_STREAM':
-
-              url = '/gopros/stream/stop';
-
-              postData = gopro;
-
-              break;
-
-            case 'START_RECORD':
-
-              url = '/gopros/recording/start';
-
-              postData = gopro;
-
-              break;
-
-            case 'STOP_RECORD':
-
-              url = '/gopros/recording/stop';
-
-              postData = gopro;
-
-              break;
-
-            default: return;
-
+      switch (actionType) {
+        case 'CONTROL':
+          url = '/gopros/control';
+          postData = gopro;
+          break;
+        case 'START_STREAM':
+          url = '/gopros/stream/start';
+          postData = { gopro };
+          if (forwarding && interfaces && selectedInterface) {
+            const destinationIp = getBroadcastAddress(interfaces[selectedInterface]);
+            if (destinationIp) postData.forwarding = { destination: destinationIp };
           }
+          break;
+        case 'STOP_STREAM':
+          url = '/gopros/stream/stop';
+          postData = gopro;
+          break;
+        case 'START_RECORD':
+          url = '/gopros/recording/start';
+          postData = gopro;
+          break;
+        case 'STOP_RECORD':
+          url = '/gopros/recording/stop';
+          postData = gopro;
+          break;
+        default: return;
+      }
+      try {
+        const response = await axios.post(`http://${address}${url}`, postData);
+        if (response.data && response.data.logs) {
+          addLog(response.data.logs);
+        }
+      } catch (error) {
+        addLog(`❌ Error with ${actionType} for GoPro ${gopro.device}: ${error.message}`);
+      }
+    });
 
-                try {
+    await Promise.allSettled(actionPromises);
 
-                  const response = await axios.post(`http://${address}${url}`, postData);
+    addLog(`Finished ${actionType} for all GoPros on host ${name}.`);
 
-                  if (response.data && response.data.logs) {
+    if (actionType === 'STOP_RECORD') {
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
+      addLog(`Refreshing file lists for all GoPros on host ${name}...`);
+      const fileRefreshPromises = gopros.map(gopro =>
+        updateGoProFileList(gopro).then(updatedGoPro => {
+          updateGoProState(gopro.device, updatedGoPro);
+        })
+      );
+      await Promise.allSettled(fileRefreshPromises);
+    }
 
-                      addLog(response.data.logs);
+    // After all actions are done, refresh all statuses
+    const refreshPromises = gopros.map(gopro =>
+      axios.post(`http://${address}/gopros/status`, gopro)
+        .then(response => {
+          updateGoProState(gopro.device, response.data);
+        })
+        .catch(error => { /* silent fail */ })
+    );
+    await Promise.allSettled(refreshPromises);
 
-                  }
+    setIsGloballyBusy(false);
 
-                } catch (error) {
-
-                  addLog(`❌ Error with ${actionType} for GoPro ${gopro.device}: ${error.message}`);
-
-                }
-
-        });
-
-    
-
-            await Promise.allSettled(actionPromises);
-
-    
-
-            addLog(`Finished ${actionType} for all GoPros on host ${name}.`);
-
-    
-
-        
-
-    
-
-            if (actionType === 'STOP_RECORD') {
-
-    
-
-              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
-
-    
-
-              addLog(`Refreshing file lists for all GoPros on host ${name}...`);
-
-    
-
-              const fileRefreshPromises = gopros.map(gopro =>
-
-    
-
-                updateGoProFileList(gopro).then(updatedGoPro => {
-
-    
-
-                  updateGoProState(gopro.device, updatedGoPro);
-
-    
-
-                })
-
-    
-
-              );
-
-    
-
-              await Promise.allSettled(fileRefreshPromises);
-
-    
-
-            }
-
-    
-
-        
-
-    
-
-            // After all actions are done, refresh all statuses
-
-    
-
-            const refreshPromises = gopros.map(gopro =>
-
-    
-
-              axios.post(`http://${address}/gopros/status`, gopro)
-
-    
-
-                .then(response => {
-
-    
-
-                  updateGoProState(gopro.device, response.data);
-
-    
-
-                })
-
-    
-
-                .catch(error => { /* silent fail */ })
-
-    
-
-            );
-
-    
-
-            await Promise.allSettled(refreshPromises);
-
-    
-
-        
-
-    
-
-            setIsGloballyBusy(false);
-
-      };
+  };
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', p: 0, mt: 0, boxSizing: 'border-box' }}>
@@ -440,7 +306,7 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
         />
       </Paper>
 
-      <Grid container xs={{ height: 'auto' }} spacing={{ xs: 2, md: 0 }} sx={{ flexGrow: 1, overflow: { xs: 'visible', md: 'hidden' } }}>
+      <Grid container spacing={{ xs: 2, md: 0 }} sx={{ flexGrow: 1, overflow: 'hidden', height: 'auto' }}>
         {/* GoPro and Controls Section */}
         <Grid item xs={12} md={8} sx={{ display: 'flex', flexDirection: 'column', height: 'auto', minHeight: '320px', width: { xs: '100%', md: '65%' }, paddingRight: { xs: 0, md: 2 } }}>
           <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>

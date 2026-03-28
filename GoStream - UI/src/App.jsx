@@ -14,7 +14,12 @@ function TabPanel(props) {
       id={`vertical-tabpanel-${index}`}
       aria-labelledby={`vertical-tab-${index}`}
       {...other}
-      style={{ width: '100%', height: '100%' }}
+      style={{
+        flexGrow: 1,
+        height: '100%',
+        minWidth: 0,
+        display: value === index ? 'block' : 'none'
+      }}
     >
       <Box sx={{ p: { xs: 1, md: 3 }, height: '100%' }}>
         {children}
@@ -24,8 +29,35 @@ function TabPanel(props) {
 }
 
 function App() {
-  const [hosts, setHosts] = useState([]);
-  const [activeTab, setActiveTab] = useState(0);
+  const [hosts, setHosts] = useState(() => {
+    const saved = localStorage.getItem('gostream-hosts');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.map(h => ({
+          ...h,
+          gopros: [],
+          interfaces: {},
+          files: [],
+          logs: [],
+          selectedInterface: h.selectedInterface || '',
+          forwarding: h.forwarding !== undefined ? h.forwarding : true
+        }));
+      } catch (e) {
+        console.error('Failed to parse saved hosts from localStorage:', e);
+        return [];
+      }
+    }
+    return [];
+  });
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = localStorage.getItem('gostream-active-tab');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('gostream-active-tab', activeTab.toString());
+  }, [activeTab]);
   const [blinker, setBlinker] = useState(true);
   const [isGloballyBusy, setIsGloballyBusy] = useState(false);
   const theme = useTheme();
@@ -37,6 +69,21 @@ function App() {
     }, 2000);
     return () => clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    const configToSave = hosts.map(h => ({
+      name: h.name,
+      address: h.address,
+      selectedInterface: h.selectedInterface,
+      forwarding: h.forwarding
+    }));
+    const configString = JSON.stringify(configToSave);
+    const existingConfig = localStorage.getItem('gostream-hosts');
+
+    if (configString !== existingConfig) {
+      localStorage.setItem('gostream-hosts', configString);
+    }
+  }, [hosts]);
 
   const updateHostState = useCallback((hostAddress, newStateOrFn) => {
     setHosts(currentHosts =>
@@ -95,6 +142,7 @@ function App() {
           borderBottom: isMobile ? 1 : 0,
           borderColor: 'divider',
           width: isMobile ? '100%' : '100px',
+          flexShrink: 0,
           '& .MuiTab-root': {
             outline: 'none',
             '&:focus': {
@@ -124,8 +172,9 @@ function App() {
             setIsGloballyBusy={setIsGloballyBusy}
           />
         </TabPanel>
-      ))}
-    </Box>
+      ))
+      }
+    </Box >
   );
 }
 
