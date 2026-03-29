@@ -121,7 +121,7 @@ class GoPro():
             return False, f'❌ Network error rebooting {self.device}: {e}'
         return f'✔  Rebooting {self.device}...'
 
-    async def takeControl(self, client: httpx.AsyncClient):
+    async def takeControl(self, client: httpx.AsyncClient, force=False):
         if not self.isAlive():
             return False, f'❌ GoPro {self.device} is not online.'
         try:
@@ -139,12 +139,14 @@ class GoPro():
             except: pass
 
             # 3. Hard-Stop everything to clear 403 "Busy" states
-            try:
-                await client.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
-                await asyncio.sleep(0.2)
-                await client.get(''.join(['http://', self.getCameraIp(), stop_recording_path]), timeout=2)
-                await asyncio.sleep(0.5)
-            except: pass
+            # ONLY if force=True or if we are not recording/streaming
+            if force:
+                try:
+                    await client.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
+                    await asyncio.sleep(0.2)
+                    await client.get(''.join(['http://', self.getCameraIp(), stop_recording_path]), timeout=2)
+                    await asyncio.sleep(0.5)
+                except: pass
 
             # 4. Sync Date and Time
             now = localtime()
@@ -196,8 +198,13 @@ class GoPro():
             return False, f'❌ Unexpected error taking control of {self.device}: {e}'
 
     async def startStream(self, client: httpx.AsyncClient, resolution=12, initialize=True):
+        # If we are already recording, we MUST NOT initialize (it stops recording)
+        is_recording = await self.getRecordingStatus(client)
+        if is_recording:
+            initialize = False
+
         if initialize:
-            controlled, msg = await self.takeControl(client)
+            controlled, msg = await self.takeControl(client, force=True)
             if not controlled: return msg
 
         if await self.getStreamStatus(client):
@@ -206,7 +213,7 @@ class GoPro():
         if initialize:
             await client.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
         
-        # When resuming, we DON'T send the resolution to avoid killing an active recording
+        # When resuming or starting during recording, we DON'T send the resolution to avoid killing an active recording
         res_param = f"&res={resolution}" if initialize else ""
         response = await client.get(''.join(['http://', self.getCameraIp(), start_stream_path, str(self.port), res_param]), timeout=2)
 
