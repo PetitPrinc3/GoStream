@@ -62,6 +62,16 @@ sudo apt-get install -y iproute2 gstreamer1.0-tools lsof
     ```
     The API will now be running and accessible on port 8000 of the host machine.
 
+> [!IMPORTANT]
+> On some machines, DHCP is not automatic on every interfaces. This leads to GoPros interface not having assigne IP addresses.
+> To fix this issue, we can enable DHCP by editing `/etc/NetworkManager/conf.d/dhcp-client.conf` and writing :
+> ```init
+> [main]
+> dhcp=dhclient
+> ```
+> Then `systemctl restart networking` should do the trick !
+
+
 ### Frontend Setup (GoStream - UI)
 
 1.  **Navigate to the UI directory:**

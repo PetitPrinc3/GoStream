@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback, useRef } from 'react';
-import { Paper, Typography, Grid, Select, MenuItem, FormControl, InputLabel, Box, IconButton, Button, Switch, FormControlLabel } from '@mui/material';
-import { Delete, Refresh, ControlCamera } from '@mui/icons-material';
+import { Paper, Typography, Grid, TextField, Box, IconButton, Button, Switch, FormControlLabel } from '@mui/material';
+import { Delete, Refresh } from '@mui/icons-material';
 import axios from 'axios';
 import GoPro from './GoPro';
 import Files from './Files';
@@ -8,7 +8,7 @@ import Logs from './Logs';
 import { isGoProOnline } from '../utils';
 
 const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGloballyBusy }) => {
-  const { address, name, interfaces, gopros, files, logs, selectedInterface, forwarding } = host;
+  const { address, name, interfaces, gopros, files, logs, targetIp, forwarding } = host;
   const hasFetched = useRef(false);
 
   const setState = useCallback((newStateOrFn) => {
@@ -21,8 +21,8 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
     }));
   }, [address, updateHostState]);
 
-  const handleInterfaceChange = (event) => {
-    setState({ selectedInterface: event.target.value });
+  const handleTargetIpChange = (event) => {
+    setState({ targetIp: event.target.value });
   };
 
   const handleForwardingChange = (event) => {
@@ -73,30 +73,29 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
       if (address && !hasFetched.current) {
         hasFetched.current = true;
         try {
+          // Discover the client's own IP address from the server's perspective
+          addLog(`Discovering client IP...`);
+          const whoAmIResponse = await axios.get(`http://${address}/system/whoami`);
+          const clientIp = whoAmIResponse.data.ip;
+
+          if (clientIp && !targetIp) {
+            setState({ targetIp: clientIp });
+            addLog(`Detected client IP: ${clientIp}. Setting as default Target IP.`);
+          }
+
           addLog(`Fetching interfaces for host ${address}...`);
           const interfacesResponse = await axios.get(`http://${address}/system/interfaces/list`);
           setState({ interfaces: interfacesResponse.data });
           addLog(`Successfully fetched interfaces.`);
-
-          addLog(`Fetching preferred interface...`);
-          const preferredInterfaceResponse = await axios.get(`http://${address}/system/interfaces/prefered`);
-          const preferredInterface = preferredInterfaceResponse.data.interface;
-          if (preferredInterface && interfacesResponse.data[preferredInterface]) {
-            setState({ selectedInterface: preferredInterface });
-            addLog(`Set preferred interface to ${preferredInterface}.`);
-          } else {
-            addLog(`No preferred interface found or it's not in the list.`);
-          }
-
         } catch (error) {
-          addLog(`Error fetching interfaces: ${error.message}`);
+          addLog(`Error during initialization: ${error.message}`);
         }
         await fetchGoPros();
       }
     };
 
     fetchInitialData();
-  }, [address, fetchGoPros, addLog, setState]);
+  }, [address, fetchGoPros, addLog, setState, targetIp]);
 
   useEffect(() => {
     const allFiles = (gopros || [])
@@ -151,27 +150,6 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
   const isStreamingAll = gopros && gopros.length > 0 && gopros.every(g => g.strm);
   const isRecordingAll = gopros && gopros.length > 0 && gopros.every(g => g.rcrd);
 
-  const getBroadcastAddress = (cidr) => {
-    if (!cidr) return null;
-    const [ip, prefix] = cidr.split('/');
-    const prefixNum = parseInt(prefix, 10);
-    if (isNaN(prefixNum) || prefixNum < 0 || prefixNum > 32) return null;
-
-    const ipParts = ip.split('.').map(part => parseInt(part, 10));
-    if (ipParts.some(isNaN) || ipParts.length !== 4) return null;
-
-    let broadcastBigInt = ipParts.reduce((acc, part) => (acc << 8n) + BigInt(part), 0n);
-    const mask = (1n << BigInt(32 - prefixNum)) - 1n;
-    broadcastBigInt = broadcastBigInt | mask;
-
-    const broadcastParts = [];
-    for (let i = 0; i < 4; i++) {
-      broadcastParts.unshift(Number(broadcastBigInt & 255n));
-      broadcastBigInt >>= 8n;
-    }
-    return broadcastParts.join('.');
-  };
-
   const handleAllGopros = async (actionType) => {
     if (isGloballyBusy) return;
     // Optimistic UI update
@@ -206,9 +184,8 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
         case 'START_STREAM':
           url = '/gopros/stream/start';
           postData = { gopro };
-          if (forwarding && interfaces && selectedInterface) {
-            const destinationIp = getBroadcastAddress(interfaces[selectedInterface]);
-            if (destinationIp) postData.forwarding = { destination: destinationIp };
+          if (forwarding) {
+            postData.forwarding = { destination: targetIp || 'auto' };
           }
           break;
         case 'STOP_STREAM':
@@ -286,20 +263,16 @@ const HostView = ({ host, removeHost, updateHostState, isGloballyBusy, setIsGlob
       </Paper>
 
       <Paper sx={{ p: 1, mb: 2, display: 'flex', alignItems: 'center' }}>
-        <FormControl fullWidth sx={{ mr: 2 }}>
-          <InputLabel id="interface-select-label">Interface</InputLabel>
-          <Select
-            labelId="interface-select-label"
-            value={selectedInterface}
-            onChange={handleInterfaceChange}
-            label="Interface"
-            size="small"
-          >
-            {Object.entries(interfaces || {}).map(([iface, ip]) => (
-              <MenuItem key={iface} value={iface}>{iface} ({ip})</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <TextField
+          label="Stream Destination"
+          value={targetIp}
+          onChange={handleTargetIpChange}
+          variant="outlined"
+          size="small"
+          fullWidth
+          sx={{ mr: 2 }}
+          placeholder="e.g., 192.168.1.5 or 'auto'"
+        />
         <FormControlLabel
           control={<Switch checked={forwarding || false} onChange={handleForwardingChange} />}
           label="Forwarding"

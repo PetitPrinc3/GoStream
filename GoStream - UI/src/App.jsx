@@ -40,7 +40,7 @@ function App() {
           interfaces: {},
           files: [],
           logs: [],
-          selectedInterface: h.selectedInterface || '',
+          targetIp: h.targetIp || '',
           forwarding: h.forwarding !== undefined ? h.forwarding : true
         }));
       } catch (e) {
@@ -74,7 +74,7 @@ function App() {
     const configToSave = hosts.map(h => ({
       name: h.name,
       address: h.address,
-      selectedInterface: h.selectedInterface,
+      targetIp: h.targetIp,
       forwarding: h.forwarding
     }));
     const configString = JSON.stringify(configToSave);
@@ -106,7 +106,7 @@ function App() {
         interfaces: {},
         files: [],
         logs: [],
-        selectedInterface: '',
+        targetIp: '',
         forwarding: true
       };
       setHosts([...hosts, newHost]);

@@ -9,27 +9,6 @@ const Home = ({ addHost, hosts, updateHostState, blinker, isGloballyBusy, setIsG
   const [hostName, setHostName] = useState(`Host ${hosts.length + 1}`);
   const [hostAddress, setHostAddress] = useState('');
 
-  const getBroadcastAddress = (cidr) => {
-    if (!cidr) return null;
-    const [ip, prefix] = cidr.split('/');
-    const prefixNum = parseInt(prefix, 10);
-    if (isNaN(prefixNum) || prefixNum < 0 || prefixNum > 32) return null;
-
-    const ipParts = ip.split('.').map(part => parseInt(part, 10));
-    if (ipParts.some(isNaN) || ipParts.length !== 4) return null;
-
-    const ipBigInt = ipParts.reduce((acc, part) => (acc << 8n) + BigInt(part), 0n);
-    const mask = (1n << BigInt(32 - prefixNum)) - 1n;
-    let broadcastBigInt = ipBigInt | mask;
-
-    const broadcastParts = [];
-    for (let i = 0; i < 4; i++) {
-      broadcastParts.unshift(Number(broadcastBigInt & 255n));
-      broadcastBigInt >>= 8n;
-    }
-    return broadcastParts.join('.');
-  };
-
   const handleDownloadObsConfig = async () => {
     if (hosts.length === 0) {
       alert("No hosts available to generate config from.");
@@ -146,9 +125,9 @@ const Home = ({ addHost, hosts, updateHostState, blinker, isGloballyBusy, setIsG
           case 'START_STREAM':
             url = '/gopros/stream/start';
             postData = { gopro };
-            if (host.forwarding && host.interfaces && host.selectedInterface) {
-              const destinationIp = getBroadcastAddress(host.interfaces[host.selectedInterface]);
-              if (destinationIp) postData.forwarding = { destination: destinationIp };
+            if (host.forwarding) {
+              // Use 'auto' to let the server detect our IP automatically
+              postData.forwarding = { destination: 'auto' };
             }
             break;
           case 'STOP_STREAM':

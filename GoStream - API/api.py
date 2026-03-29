@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from gopro_handler import GoPro, get_gopros
 import psutil
 import socket
@@ -29,7 +29,7 @@ def reconcile_active_streams():
     and repopulate the ACTIVE_STREAMS state to avoid orphans.
     """
     print("Reconciling active streams on startup...")
-    
+
     # Temporary storage for found forwarders, grouped by device name
     found_forwarders = {}
 
@@ -37,7 +37,7 @@ def reconcile_active_streams():
         try:
             if 'gst-launch-1.0' in proc.name() and proc.cmdline():
                 cmdline = proc.cmdline()
-                
+
                 source_ip = None
                 port = None
                 destination_ip = None
@@ -51,7 +51,7 @@ def reconcile_active_streams():
                         port = int(arg.split('=')[1])
                     elif 'host=' in arg:
                         destination_ip = arg.split('=')[1]
-                
+
                 # Infer device name from source IP using psutil
                 if source_ip:
                     for iface, addrs in psutil.net_if_addrs().items():
@@ -61,7 +61,7 @@ def reconcile_active_streams():
                                 break
                         if device_name:
                             break
-                
+
                 if device_name and port and destination_ip:
                     if device_name not in found_forwarders:
                         found_forwarders[device_name] = []
@@ -80,7 +80,7 @@ def reconcile_active_streams():
             print(f"Found {len(streams)} forwarders for {device_name}. Cleaning up orphans...")
             # Sort by PID descending (newest first)
             streams.sort(key=lambda x: x['pid'], reverse=True)
-            
+
             # Keep the newest one
             stream_to_keep = streams[0]
             ACTIVE_STREAMS[device_name] = stream_to_keep
@@ -171,6 +171,10 @@ async def get_interface_traffic(interface: str):
     else:
         return 0
 
+@app.get('/system/whoami')
+async def who_am_i(request: Request):
+    return {"ip": request.client.host}
+
 # Stream forwarding
 
 def stop_all_forwarders_for_gopro(gopro: GoPro):
@@ -191,12 +195,23 @@ def stop_all_forwarders_for_gopro(gopro: GoPro):
 
 @app.get('/system/forward/start/{source}/{port}/{destination}')
 async def forward_stream(source: str, port: int, destination: str):
-    forwarding_cmd = [forwarder_bin, '-v', 'udpsrc', f'address={source}', f'port={port}', '!', 'queue', '!', 'udpsink', f'host={destination}', f'port={port}']
+    # This pipeline now uses 'tsdemux' and 'sync=false'.
+    # 'sync=false' on udpsink is CRITICAL for live streams to prevent looping/stuttering.
+    forwarding_cmd = [
+        forwarder_bin, '-v',
+        'udpsrc', f'address={source}', f'port={port}', 'buffer-size=5242880',
+        '!', 'tsparse',
+        '!', 'tsdemux', 'name=demux',
+        'demux.', '!', 'queue', 'max-size-buffers=2000', 'max-size-time=0', 'max-size-bytes=0',
+        '!', 'h264parse',
+        '!', 'mpegtsmux',
+        '!', 'udpsink', f'host={destination}', f'port={port}', 'buffer-size=5242880', 'sync=false'
+    ]
     process = subprocess.Popen(
         forwarding_cmd,
         preexec_fn=os.setsid,
         stdout=subprocess.PIPE
-    ) 
+    )
     return process.pid
 
 @app.get('/system/forward/stop/{pid}')
@@ -219,34 +234,34 @@ class StreamInfo(BaseModel):
 @app.post('/obs/config')
 async def generate_obs_config():
     scene_name = "GoStream"
-    
+
     streams = [StreamInfo(**info) for info in ACTIVE_STREAMS.values()]
-    
+
     scene_items = []
     sources = []
-    
+
     # Simple grid layout
     x, y = 0, 0
     canvas_width, canvas_height = 1920, 1080 # Assuming a 1080p canvas
     num_streams = len(streams)
-    
+
     cols = 0
     if num_streams > 0:
         cols = int(num_streams**0.5)
         if cols * cols < num_streams:
             cols += 1
-    
+
     if cols == 0:
         item_width = 0
         item_height = 0
     else:
         item_width = canvas_width / cols
         item_height = item_width * (9/16) # Assuming 16:9 aspect ratio
-    
+
     rows = 0
     if num_streams > 0 and cols > 0:
         rows = (num_streams + cols - 1) // cols
-    
+
     if rows > 0 and item_height * rows > canvas_height:
         scale_factor = canvas_height / (item_height * rows)
         item_height *= scale_factor
@@ -254,7 +269,7 @@ async def generate_obs_config():
 
     for i, stream in enumerate(streams):
         source_name = stream.name
-        
+
         # Add source to scene
         scene_items.append({
             "name": source_name,
@@ -269,7 +284,7 @@ async def generate_obs_config():
             "bounds_align": 0,
             "bounds": { "x": 1920.0, "y": 1080.0 }
         })
-        
+
         x += item_width
         if (i + 1) % cols == 0:
             x = 0
@@ -284,7 +299,7 @@ async def generate_obs_config():
                 "is_local_file": False,
                 "input": f"udp://{stream.destination}:{stream.port}",
                 "input_format": "udp",
-                "buffering_mb": 0,
+                "buffering_mb": 2, # Increase buffering to 2MB to handle network jitter
                 "hw_decode": True,
                 "reconnect_delay_sec": 1
             }
@@ -356,7 +371,7 @@ async def reboot(gopro_json: dict):
     return {'logs': logs}
 
 @app.post('/gopros/stream/start')
-async def start_stream(payload: dict):
+async def start_stream(payload: dict, request: Request):
     gopro_json = payload.get('gopro')
     forwarding_data = payload.get('forwarding')
 
@@ -376,17 +391,21 @@ async def start_stream(payload: dict):
         await gopro.update_status(client)
 
         if gopro.strm and forwarding_data:
+            # Auto-detect client IP if destination is not provided or set to 'auto'
             destination = forwarding_data.get('destination')
+            if not destination or destination == 'auto':
+                destination = request.client.host
+
             source = gopro.device_ip
             port = gopro.port
-            
+
             if destination:
                 pid = await forward_stream(
                     source=source,
                     port=port,
                     destination=destination
                 )
-                logs += f"; Forwarder started with PID {pid}."
+                logs += f"; Forwarder started (Unicast to {destination}) with PID {pid}."
                 ACTIVE_STREAMS[gopro.device] = {
                     "name": gopro.device,
                     "port": port,
@@ -397,7 +416,7 @@ async def start_stream(payload: dict):
     response_data = {'logs': logs}
     if pid:
         response_data['pid'] = pid
-    
+
     return response_data
 
 @app.post('/gopros/stream/stop')
@@ -490,8 +509,8 @@ async def wipe_files(gopro_json: dict): # Renamed to avoid conflict
     async with httpx.AsyncClient() as client:
         for file in gopro.files:
             logs.append(await gopro.removeFile(client, file.path))
-        
+
         await sleep(1)
-        
+
         await gopro.getFiles(client)
     return {'GoPro': gopro.toJson(), 'logs': '; '.join([log for log in logs if log is not None])}

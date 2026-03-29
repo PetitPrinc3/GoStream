@@ -23,19 +23,6 @@ media_download_path="/videos/DCIM/"
 media_delete_path="/gopro/media/delete/file?path="
 gopro_reboot_path="/gp/gpControl/command/system/reset"
 
-gorpro_presets = [
-    # Mode easy
-    '/gopro/camera/setting?option=0&setting=175',
-    # Mode vidéo
-    '/gopro/camera/presets/set_group?id=1000',
-    # Mode plein écran
-    '/gopro/camera/setting?option=0&setting=193',
-    # Qualité 4k
-    '/gopro/camera/setting?option=1&setting=186',
-    # Super Slow-Mo
-    '/gopro/camera/setting?option=101&setting=176'
-]
-
 first_port = 8554
 
 class File():
@@ -138,35 +125,90 @@ class GoPro():
         if not self.isAlive():
             return False, f'❌ GoPro {self.device} is not online.'
         try:
-            response = await client.get(''.join(['http://', self.getCameraIp(), usb_mode_path]), timeout=2)
-            if response.status_code != 200 or ('err_msg' in response.json() and response.json()['err_msg'] != 'Success'):
-                return False, f'❌ Error switching {self.device} to USB mode.'
-
-            response = await client.get(''.join(['http://', self.getCameraIp(), usb_control_path]), timeout=2)
-            if response.status_code != 200 or ('err_msg' in response.json() and response.json()['err_msg'] != 'Success'):
-                return False, f'❌ Error taking control of {self.device} over USB.'
-        except httpx.RequestError as e:
-            return False, f'❌ Network error taking control of {self.device}: {e}'
-
-        for preset in gorpro_presets:
+            # 1. Identify as Third-Party (Recommended for HERO12)
             try:
-                response = await client.get(''.join(['http://', self.getCameraIp(), preset]), timeout=2)
-                if response.status_code != 200 or ('error' in response.json()):
-                    return False, f'❌ Error loading presets on device {self.device}.'
-            except httpx.RequestError as e:
-                return False, f'❌ Error loading presets on device {self.device}.'
+                await client.get(''.join(['http://', self.getCameraIp(), '/gopro/camera/analytics/set_client_info']), timeout=2)
+            except: pass
 
-        return True, f'✔  Took control of {self.device}.'
+            # 2. Get Camera Info
+            model_name = "Unknown"
+            try:
+                info_resp = await client.get(''.join(['http://', self.getCameraIp(), '/gopro/camera/info']), timeout=2)
+                if info_resp.status_code == 200:
+                    model_name = info_resp.json().get('model_name', "Unknown")
+            except: pass
 
-    async def startStream(self, client: httpx.AsyncClient):
-        controlled, msg = await self.takeControl(client)
-        if not controlled: return msg
+            # 3. Hard-Stop everything to clear 403 "Busy" states
+            try:
+                await client.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
+                await asyncio.sleep(0.2)
+                await client.get(''.join(['http://', self.getCameraIp(), stop_recording_path]), timeout=2)
+                await asyncio.sleep(0.5)
+            except: pass
+
+            # 4. Sync Date and Time
+            now = localtime()
+            date_str = strftime('%Y_%m_%d', now)
+            time_str = strftime('%H_%M_%S', now)
+            sync_path = f"/gopro/camera/set_date_time?date={date_str}&time={time_str}"
+            await client.get(''.join(['http://', self.getCameraIp(), sync_path]), timeout=2)
+
+            # 5. Switch to USB Mode & Take Control
+            await client.get(''.join(['http://', self.getCameraIp(), usb_mode_path]), timeout=2)
+            await asyncio.sleep(0.5)
+            await client.get(''.join(['http://', self.getCameraIp(), usb_control_path]), timeout=2)
+            await asyncio.sleep(1.5) # Wait for UI controller
+
+            # 6. FORCE Pro Mode and Disable Easy Mode (Critical for HERO12)
+            await client.get(''.join(['http://', self.getCameraIp(), '/gopro/camera/setting?option=1&setting=175']), timeout=2)
+            await asyncio.sleep(1.0) # Long breath for mode switch
+
+            # 7. Apply presets with HERO12 specific ordering
+            failed_presets = []
+            
+            init_sequence = [
+                ('/gopro/camera/presets/set_group?id=1000', 'Video Mode'),
+                ('/gopro/camera/setting?option=9&setting=2', '1080p Res'),
+                ('/gopro/camera/setting?option=1&setting=108', '16:9 Ratio'),
+                ('/gopro/camera/setting?option=1&setting=3', '120 FPS'),
+                ('/gopro/camera/setting?option=4&setting=121', 'Linear Lens'),
+                ('/gopro/camera/setting?option=0&setting=135', 'Hypersmooth Off'),
+                ('/gopro/camera/setting?option=2&setting=134', '60Hz Flicker')
+            ]
+
+            for path, name in init_sequence:
+                try:
+                    response = await client.get(''.join(['http://', self.getCameraIp(), path]), timeout=2)
+                    if response.status_code != 200:
+                        failed_presets.append(f"{name} ({response.status_code})")
+                    await asyncio.sleep(0.5) 
+                except:
+                    failed_presets.append(f"{name} (Err)")
+
+            # 8. Final Keep-Alive
+            await client.get(''.join(['http://', self.getCameraIp(), '/gopro/camera/keep_alive']), timeout=2)
+
+            if failed_presets:
+                return True, f'✔  Controlled {self.device} ({model_name}) but some presets skipped: {", ".join(failed_presets)}.'
+            
+            return True, f'✔  Took control of {self.device} ({model_name}) and initialized settings.'
+        except Exception as e:
+            return False, f'❌ Unexpected error taking control of {self.device}: {e}'
+
+    async def startStream(self, client: httpx.AsyncClient, resolution=12, initialize=True):
+        if initialize:
+            controlled, msg = await self.takeControl(client)
+            if not controlled: return msg
 
         if await self.getStreamStatus(client):
             return f'✔  Stream already running for {self.device}.'
 
-        await client.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
-        response = await client.get(''.join(['http://', self.getCameraIp(), start_stream_path, str(self.port)]), timeout=2)
+        if initialize:
+            await client.get(''.join(['http://', self.getCameraIp(), stop_stream_path]), timeout=2)
+        
+        # When resuming, we DON'T send the resolution to avoid killing an active recording
+        res_param = f"&res={resolution}" if initialize else ""
+        response = await client.get(''.join(['http://', self.getCameraIp(), start_stream_path, str(self.port), res_param]), timeout=2)
 
         if response.status_code != 200:
             return f'❌ Error starting stream for {self.device} on port {self.port}.'
@@ -195,8 +237,12 @@ class GoPro():
             return f'⚠️ Something went wrong stopping stream on {self.device}.'
 
     async def startRecording(self, client: httpx.AsyncClient):
-        controlled, msg = await self.takeControl(client)
-        if not controlled: return msg
+        # Check if we are already streaming.
+        was_streaming = await self.getStreamStatus(client)
+        
+        if not await self.getControlStatus(client):
+            controlled, msg = await self.takeControl(client)
+            if not controlled: return msg
 
         if await self.getRecordingStatus(client):
             return f'✔  Recording already running for {self.device}.'
@@ -206,15 +252,21 @@ class GoPro():
         if response.status_code != 200:
             return f'❌ Error starting recording for {self.device}.'
 
-
         await asyncio.sleep(1)
+        log_msg = f'🔥 Started recording for {self.device}.'
+        
+        if was_streaming:
+            # Recovery: resume stream WITHOUT initialization to protect recording
+            await asyncio.sleep(2) 
+            await self.startStream(client, initialize=False)
+            log_msg += " (Stream resumed)"
 
-        if await self.getRecordingStatus(client):
-            return f'🔥 Started recording for {self.device}.'
-        else:
-            return f'⚠️ Something went wrong starting recording on {self.device}.'
+        return log_msg
 
-    async def stopRecording(self, client: httpx.AsyncClient): # Renamed
+    async def stopRecording(self, client: httpx.AsyncClient):
+        # Check if we were streaming
+        was_streaming = await self.getStreamStatus(client)
+        
         if not await self.getRecordingStatus(client):
             return f'✔  No active recording for {self.device}.'
 
@@ -224,11 +276,15 @@ class GoPro():
             return f'❌ Error stopping recording for {self.device}.'
 
         await asyncio.sleep(2)
+        log_msg = f'✔  Stopped recording for {self.device}.'
 
-        if not await self.getRecordingStatus(client):
-            return f'✔  Stopped recording for {self.device}.'
-        else:
-            return f'⚠️ Something went wrong stopping recording on {self.device}.'
+        if was_streaming:
+            # Recovery: resume stream WITHOUT initialization
+            await asyncio.sleep(2)
+            await self.startStream(client, initialize=False)
+            log_msg += " (Stream resumed)"
+
+        return log_msg
 
     async def getFiles(self, client: httpx.AsyncClient):
         try:
@@ -370,7 +426,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    devices, logs = get_gopros()
+    devices, logs = asyncio.run(get_gopros())
     for log in logs:
         print(log)
 
@@ -380,15 +436,15 @@ if __name__ == "__main__":
 
     if args.start:
         for device in devices:
-            print(device.startStream())
+            print(asyncio.run(device.startStream(httpx.AsyncClient())))
 
     if args.stop:
         for device in devices:
-            print(device.stopStream())
+            print(asyncio.run(device.stopStream(httpx.AsyncClient())))
             
     if args.check:
         for device in devices:
-            stream_status = "Streaming" if device.getStreamStatus() else "Not Streaming"
-            rec_status = "Recording" if device.getRecordingStatus() else "Not Recording"
+            stream_status = "Streaming" if asyncio.run(device.getStreamStatus(httpx.AsyncClient())) else "Not Streaming"
+            rec_status = "Recording" if asyncio.run(device.getRecordingStatus(httpx.AsyncClient())) else "Not Recording"
             print(f"{device.device} ({device.device_ip}): {stream_status}, {rec_status}")
-            print(device.stopStream())
+            print(asyncio.run(device.stopStream(httpx.AsyncClient())))

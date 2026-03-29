@@ -177,40 +177,14 @@ const GoPro = ({ gopro, host, addLog, updateGoProState, updateFileList, isGlobal
   const startStream = () => {
     const postData = { gopro };
     if (host.forwarding) {
-      const destinationIp = getBroadcastAddress(host.interfaces[host.selectedInterface]);
-      if (destinationIp) {
-        postData.forwarding = { destination: destinationIp };
-      } else {
-        addLog(`❌ Cannot start forwarder: Invalid destination IP or interface not selected.`);
-        // We still want to attempt to start the stream even if forwarding fails to setup
-      }
+      // Use the targetIp from the host state, or 'auto' as a fallback
+      postData.forwarding = { destination: host.targetIp || 'auto' };
     }
     return handleApiCall('/gopros/stream/start', 'start stream', postData);
   };
   const stopStream = () => handleApiCall('/gopros/stream/stop', 'stop stream', gopro);
   const startRecording = () => handleApiCall('/gopros/recording/start', 'start recording', gopro);
   const stopRecording = () => handleApiCall('/gopros/recording/stop', 'stop recording', gopro);
-
-  const getBroadcastAddress = (cidr) => {
-    if (!cidr) return null;
-    const [ip, prefix] = cidr.split('/');
-    const prefixNum = parseInt(prefix, 10);
-    if (isNaN(prefixNum) || prefixNum < 0 || prefixNum > 32) return null;
-
-    const ipParts = ip.split('.').map(part => parseInt(part, 10));
-    if (ipParts.some(isNaN) || ipParts.length !== 4) return null;
-
-    const ipBigInt = ipParts.reduce((acc, part) => (acc << 8n) + BigInt(part), 0n);
-    const mask = (1n << BigInt(32 - prefixNum)) - 1n;
-    let broadcastBigInt = ipBigInt | mask;
-
-    const broadcastParts = [];
-    for (let i = 0; i < 4; i++) {
-      broadcastParts.unshift(Number(broadcastBigInt & 255n));
-      broadcastBigInt >>= 8n;
-    }
-    return broadcastParts.join('.');
-  };
 
   const handleAction = async (action) => {
     if (isBusy) return;
